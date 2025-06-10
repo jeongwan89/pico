@@ -28,34 +28,43 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(blink C CXX ASM)
+project(motorCtrl C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(blink src/main.c )
+add_executable(motorCtrl src/motorCtrl.cpp )
 
-pico_set_program_name(blink "blink")
-pico_set_program_version(blink "0.1")
+pico_set_program_name(motorCtrl "motorCtrl")
+pico_set_program_version(motorCtrl "0.1")
+
+# Generate PIO header
+pico_generate_pio_header(motorCtrl ${CMAKE_CURRENT_LIST_DIR}/src/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(blink 0)
-pico_enable_stdio_usb(blink 1)
+pico_enable_stdio_uart(motorCtrl 1)
+pico_enable_stdio_usb(motorCtrl 1)
 
-# Add subdirectories for libraries
-add_subdirectory(lib/tm1637)
+# 내가 추가한 부분
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/lib/tm1637)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/lib/pico_dht)
+
 # Add the standard library to the build
-target_link_libraries(blink
+target_link_libraries(motorCtrl
         pico_stdlib
-        tm1637)
+        tm1637
+        dht
+        hardware_i2c
+        hardware_pio
+        )
 
 # Add the standard include files to the build
-target_include_directories(blink PRIVATE
+target_include_directories(motorCtrl PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
-pico_add_extra_outputs(blink)
+pico_add_extra_outputs(motorCtrl)
 
