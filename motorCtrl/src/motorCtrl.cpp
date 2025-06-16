@@ -87,6 +87,6 @@ int main()
             static_cast<uint8_t>(humidity / 10) % 10,      // Tens place of humidity
             static_cast<uint8_t>(humidity) % 10             // Units place of humidity
         };
-        display2.display_digits(digits); // Display temperature and humidity on the second display
+        display2.display_digits(digits, 2); // Display temperature and humidity on the second display
     }
 }

@@ -122,7 +122,7 @@ void TM1637::display_number(int num) {
     set_segments(segs);
 }
 
-void TM1637::display_digits(uint8_t digits[4]) {
+void TM1637::display_digits(uint8_t digits[4], uint8_t decimal_point = -1) {
     uint8_t segs[4];
     for (int i = 0; i < 4; i++) {
         if (digits[i] <= 9)
@@ -130,6 +130,9 @@ void TM1637::display_digits(uint8_t digits[4]) {
         else
             segs[i] = BLANK_SEGMENT; // blank
     }
+    if(decimal_point >= 0 && decimal_point < 4) {
+        segs[3 - decimal_point] |= SEG_DP; // add decimal point
+    } 
     set_segments(segs);
 }
 

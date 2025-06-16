@@ -17,7 +17,7 @@ public:
     void init();
     void set_brightness(uint8_t brightness);
     void display_number(int num);
-    void display_digits(uint8_t digits[4]);
+    void display_digits(uint8_t digits[4], uint8_t decimal_point);
     int display_float(float value, uint8_t decimal_point = 0);
     void clear();
     //! Translate a single digit into 7 segment code
