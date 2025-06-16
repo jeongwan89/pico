@@ -1,14 +1,21 @@
-add_library(dht STATIC dht.c)
+cmake_minimum_required(VERSION 3.13)
+project(dht22_lib C CXX ASM)
 
-pico_generate_pio_header(dht ${CMAKE_CURRENT_LIST_DIR}/dht.pio)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
-target_include_directories(dht 
+add_library(dht22_lib STATIC DHT22.cpp)
+
+target_include_directories(dht22_lib 
     PUBLIC 
     ${CMAKE_CURRENT_LIST_DIR})
 
-target_link_libraries(dht
+target_link_libraries(dht22_lib
     PUBLIC
+    pico_stdlib
+    hardware_gpio
+    hardware_timer
     hardware_clocks
     hardware_dma
     hardware_pio 
-    pico_stdlib)
+)

@@ -35,7 +35,9 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(motorCtrl src/motorCtrl.cpp )
+add_executable(motorCtrl 
+    src/motorCtrl.cpp
+    src/motorCtrl_util.cpp)
 
 pico_set_program_name(motorCtrl "motorCtrl")
 pico_set_program_version(motorCtrl "0.1")
@@ -55,7 +57,7 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/lib/pico_dht)
 target_link_libraries(motorCtrl
         pico_stdlib
         tm1637
-        dht
+        dht22_lib
         hardware_i2c
         hardware_pio
         )
