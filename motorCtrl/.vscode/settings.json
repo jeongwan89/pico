@@ -17,6 +17,7 @@
     "cmake.configureOnOpen": true,
     "cmake.generator": "Ninja",
     "cmake.cmakePath": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+    "cmake.useCMakePresets": "always",
     "C_Cpp.debugShortcut": false,
     "terminal.integrated.env.windows": {
         "PICO_SDK_PATH": "${env:USERPROFILE}/.pico-sdk/sdk/2.2.0",
