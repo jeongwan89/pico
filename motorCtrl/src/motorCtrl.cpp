@@ -57,7 +57,7 @@ int main()
     printf("Loaded program at %d\n", offset);
     
     #ifdef PICO_DEFAULT_LED_PIN
-    blink_pin_forever(pio, 0, offset, PICO_DEFAULT_LED_PIN, 3);
+    blink_pin_forever(pio, 0, offset, PICO_DEFAULT_LED_PIN, 2);
     #else
     blink_pin_forever(pio, 0, offset, 6, 3);
     #endif
