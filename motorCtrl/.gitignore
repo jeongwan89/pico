@@ -1,2 +1,7 @@
 build
-!.vscode/*
+.vscode/*
+.gitignore
+out/*
+../build
+../../build
+

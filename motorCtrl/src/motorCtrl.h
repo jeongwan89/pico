@@ -19,6 +19,6 @@
 typedef void (*timer_callback_t)(DHT22 &dht, float &temperature_c, float &humidity);
 
 // 함수 선언
-void periodic_task(uint32_t interval_ms, timer_callback_t callback_DHT, DHT22 &dht, float &temperature_c, float &humidity);
+int periodic_task(uint32_t interval_ms, timer_callback_t callback_DHT, DHT22 &dht, float &temperature_c, float &humidity);
 void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq);
 void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity);

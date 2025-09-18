@@ -8,12 +8,14 @@
 
 // 주기적 작업 실행 함수
 typedef void (*timer_callback_t)(DHT22 &dht, float &temperature_c, float &humidity);
-void periodic_task(uint32_t interval_ms, timer_callback_t callback_DHT, DHT22 &dht, float &temperature_c, float &humidity) {
+int periodic_task(uint32_t interval_ms, timer_callback_t callback_DHT, DHT22 &dht, float &temperature_c, float &humidity) {
     static absolute_time_t next_time;
     if(time_reached(next_time)) {
         callback_DHT(dht, temperature_c, humidity);
         next_time = make_timeout_time_ms(interval_ms);
+        return 1; // 작업이 실행됨
     }
+    return 0; // 작업이 실행되지 않음
 }
 
 

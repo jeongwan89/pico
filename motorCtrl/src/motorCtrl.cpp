@@ -79,14 +79,15 @@ int main()
         sleep_ms(100);
         float humidity;
         float temperature_c;
-        periodic_task(5000, callbackDHT, dht22, temperature_c, humidity); // Call the DHT22 read function every 5 seconds
-        // Display temperature and humidity on the second display
-        uint8_t digits[4] = {
-            static_cast<uint8_t>(temperature_c / 10) % 10, // Tens place of temperature
-            static_cast<uint8_t>(temperature_c) % 10,      // Units place of temperature
-            static_cast<uint8_t>(humidity / 10) % 10,      // Tens place of humidity
-            static_cast<uint8_t>(humidity) % 10             // Units place of humidity
-        };
-        display2.display_digits(digits, 2); // Display temperature and humidity on the second display
+        if(periodic_task(5000, callbackDHT, dht22, temperature_c, humidity)) { // Call the DHT22 read function every 5 seconds
+            // Display temperature and humidity on the second display
+            uint8_t digits[4] = {
+                static_cast<uint8_t>(temperature_c / 10) % 10, // Tens place of temperature
+                static_cast<uint8_t>(temperature_c) % 10,      // Units place of temperature
+                static_cast<uint8_t>(humidity / 10) % 10,      // Tens place of humidity
+                static_cast<uint8_t>(humidity) % 10             // Units place of humidity
+            };
+            display2.display_digits(digits, 2); // Display temperature and humidity on the second display
+        }
     }
 }
