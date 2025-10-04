@@ -65,17 +65,21 @@ int main()
     // TM1637 Initialisation
     TM1637 display(TM1637_CLK_PIN, TM1637_DIO_PIN);
     TM1637 display2(TM1637_2_CLK_PIN, TM1637_2_DIO_PIN); // Alternative display
+    TM1637 display3(TM1637_3_CLK_PIN, TM1637_3_DIO_PIN); // Third display
     display.init();
     display.set_brightness(0x0f); // Set maximum brightness
     display2.init(); // Initialize the second display
     display2.set_brightness(0x0f); // Set maximum brightness for the second display
-
+    display3.init(); // Initialize the third display
+    display3.set_brightness(0x0f); // Set maximum brightness for the third display
+    
+    // Main loop
     int count = 0;
     while (true) {
         printf("Hello, world!\n");
         display.display_number(count); // Display the count on the TM1637
         //display2.display_float(static_cast<float> (count) /100, 2); // Display count as float with 2 decimal places
-        count = (count + 1) /*% 10000*/; // Increment count, wrap around at 10000
+        count = (count + 1) % 10000; // Increment count, wrap around at 10000
         sleep_ms(100);
         float humidity;
         float temperature_c;

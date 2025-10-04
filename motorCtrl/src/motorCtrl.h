@@ -11,6 +11,8 @@
 #define TM1637_DIO_PIN 19
 #define TM1637_2_CLK_PIN 20
 #define TM1637_2_DIO_PIN 21
+#define TM1637_3_CLK_PIN 26
+#define TM1637_3_DIO_PIN 27
 #define I2C_PORT i2c0
 #define I2C_SDA 8
 #define I2C_SCL 9
