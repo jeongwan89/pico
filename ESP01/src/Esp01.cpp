@@ -7,6 +7,8 @@
 // This library is used to control a TM1637 7-segment display driver.
 #include "tm1637.h"
 #include "Esp01.h"
+#include "hardware/uart.h"
+#include "hardware/gpio.h"
 
 // I2C defines
 // This example will use I2C0 on GPIO8 (SDA) and GPIO9 (SCL) running at 400KHz.
@@ -27,6 +29,9 @@ void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
 int main()
 {
     stdio_init_all();
+
+    // Initialize ESP-01 UART
+    esp01_init();
 
     // DHT22센서를 GPIO 20에 연결
     DHT22 dht22(15); // GPIO 15 is used for DHT22 data pin
@@ -79,11 +84,38 @@ int main()
     static float temperature_c = 0.0f;
     while (true) {
         printf("Hello, world!\n");
+        // ESP-01 폴링: 수신 데이터가 있으면 처리
+        esp01_poll();
         display.display_number(count); // 첫 번째 TM1637에 count 표시
         periodic_task(5000, callbackDHT, dht22, temperature_c, humidity); // 5초마다 센서값 갱신
         display2.display_float(humidity, 1); // 두 번째 TM1637에 습도 표시
         display3.display_float(temperature_c, 1); // 세 번째 TM1637에 온도 표시
         count = (count + 1) % 10000;
         sleep_ms(100);
+    }
+}
+
+// ESP-01 초기화
+void esp01_init(){
+    // Configure UART1 for ESP-01 on GP4/GP5
+    uart_init(ESP01_UART, ESP01_BAUD);
+    // Map GP4 -> UART1 TX, GP5 -> UART1 RX
+    gpio_set_function(ESP01_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(ESP01_RX_PIN, GPIO_FUNC_UART);
+    // Optional: enable FIFO, set format (8N1)
+    uart_set_format(ESP01_UART, 8, 1, UART_PARITY_NONE);
+    // Disable blocking on stdin/stdout for uart
+    uart_set_fifo_enabled(ESP01_UART, true);
+}
+
+// ESP-01 폴링: 수신된 바이트를 읽어 표준 출력으로 에코하거나 추가 처리 가능
+void esp01_poll(){
+    while(uart_is_readable(ESP01_UART)){
+        int c = uart_getc(ESP01_UART);
+        if(c >= 0){
+            // 간단히 stdout으로 에코
+            putchar((char)c);
+            fflush(stdout);
+        }
     }
 }
