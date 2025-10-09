@@ -6,7 +6,6 @@
 #include "hardware/i2c.h"
 #include "hardware/pio.h"
 
-// I2C 및 TM1637 핀 정의
 #define TM1637_CLK_PIN 18
 #define TM1637_DIO_PIN 19
 #define TM1637_2_CLK_PIN 20
@@ -32,8 +31,20 @@ void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity);
 #define ESP01_UART uart1
 #define ESP01_TX_PIN 4
 #define ESP01_RX_PIN 5
-#define ESP01_BAUD 57600
+#define ESP01_BAUD 115200
 
 // ESP-01 초기화 및 폴링 함수
 void esp01_init();
 void esp01_poll();
+// WiFi helper: connect to given SSID (blocking). Implemented in Esp01_util.cpp
+// returns true on success
+bool esp01_wifi_connect(const char *ssid, const char *password, uint32_t timeout_ms);
+// MQTT setup helper: configure MQTT client and subscribe to topics
+// topics: array of pointers, topic_count how many entries
+bool esp01_mqtt_setup(const char *host, int port, const char *username, const char *password, const char *topics[], int topic_count);
+// message callback used by main to print incoming MQTT messages
+void esp01_print_msg_callback(const char *topic, const char *payload);
+// Maintain MQTT connection (call regularly). Returns true if connected.
+bool esp01_mqtt_maintain();
+
+// (No trailing markdown markers)

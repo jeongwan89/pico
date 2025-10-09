@@ -37,7 +37,8 @@ pico_sdk_init()
 
 add_executable(Esp01 
     src/Esp01.cpp
-    src/Esp01_util.cpp)
+    src/Esp01_util.cpp
+    src/ATmqtt.cpp)
 
 pico_set_program_name(Esp01 "Esp01")
 pico_set_program_version(Esp01 "0.1")

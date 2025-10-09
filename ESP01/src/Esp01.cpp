@@ -7,6 +7,7 @@
 // This library is used to control a TM1637 7-segment display driver.
 #include "tm1637.h"
 #include "Esp01.h"
+#include "ATmqtt.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
 
@@ -32,6 +33,34 @@ int main()
 
     // Initialize ESP-01 UART
     esp01_init();
+
+    // Try to connect to WiFi via ESP-01 (blocking call)
+    // SSID: farmmain5G, password: wweerrtt
+    if (esp01_wifi_connect("farmmain5G", "wweerrtt", 20000)) {
+        printf("ESP01 WiFi connected (attempt returned success)\n");
+        // After WiFi is up, configure MQTT and subscribe to topics
+        const char *topics[] = {
+            "Sensor/GH1/Center/Temp",
+            "Sensor/GH1/Center/Hum",
+            "Sensor/GH2/Center/Temp",
+            "Sensor/GH2/Center/Hum",
+            "Sensor/GH3/Center/Temp",
+            "Sensor/GH3/Center/Hum",
+            "Sensor/GH4/Center/Temp",
+            "Sensor/GH4/Center/Hum",
+            "Sensor/Spare/One",
+            "Sensor/Spare/Two"
+        };
+        if (esp01_mqtt_setup("192.168.0.24", 1883, "farmmain", "eerrtt", topics, 10)){
+            // register incoming message callback to print to terminal
+            atmqtt_set_msg_callback(esp01_print_msg_callback);
+            printf("MQTT setup completed\n");
+        } else {
+            printf("MQTT setup failed\n");
+        }
+    } else {
+        printf("ESP01 WiFi connect attempt failed or timed out\n");
+    }
 
     // DHT22센서를 GPIO 20에 연결
     DHT22 dht22(15); // GPIO 15 is used for DHT22 data pin
@@ -85,7 +114,11 @@ int main()
     while (true) {
         printf("Hello, world!\n");
         // ESP-01 폴링: 수신 데이터가 있으면 처리
-        esp01_poll();
+    esp01_poll();
+    // process ATMQTT incoming messages and invoke callback
+    atmqtt_process_io();
+    // maintain MQTT connection (reconnect if needed)
+    esp01_mqtt_maintain();
         display.display_number(count); // 첫 번째 TM1637에 count 표시
         periodic_task(5000, callbackDHT, dht22, temperature_c, humidity); // 5초마다 센서값 갱신
         display2.display_float(humidity, 1); // 두 번째 TM1637에 습도 표시
