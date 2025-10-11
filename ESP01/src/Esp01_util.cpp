@@ -8,6 +8,9 @@
 #include "tm1637.h"
 #include "hardware/i2c.h"
 #include "hardware/pio.h"
+#include "hardware/watchdog.h"
+
+// (watchdog_reboot prototype removed; use hardware/watchdog.h and watchdog_enable())
 
 // Stored config for maintain() to use
 static char mqtt_conf_host[64] = {0};
@@ -20,15 +23,22 @@ static int mqtt_conf_topic_count = 0;
 
 bool esp01_wifi_connect(const char *ssid, const char *password, uint32_t timeout_ms){
     atmqtt_init();
-    printf("Attempting to connect to WiFi SSID='%s'\n", ssid);
+    printf("Attempting to connect to WiFi SSID='%s' with timeout %u ms\n", ssid, (unsigned)timeout_ms);
     uint32_t start = to_ms_since_boot(get_absolute_time());
+    uint32_t attempt = 0;
+    uint32_t backoff_ms = 1000; // start 1s
     while ((to_ms_since_boot(get_absolute_time()) - start) < timeout_ms){
+        attempt++;
+        printf("WiFi connect attempt %u\n", (unsigned)attempt);
         if (atmqtt_wifi_connect(ssid, password, 5000)){
             printf("AT reported WiFi connected (CWJAP OK)\n");
             return true;
         }
-        sleep_ms(1000);
+        // Exponential backoff with cap
+        sleep_ms(backoff_ms);
+        backoff_ms = (backoff_ms * 2 > 16000) ? 16000 : backoff_ms * 2;
     }
+    printf("WiFi connect timed out after %u ms\n", (unsigned)(to_ms_since_boot(get_absolute_time()) - start));
     return false;
 }
 
@@ -95,4 +105,36 @@ void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity){
         int error = dht.getLastError();
         printf("센서 읽기 실패! 에러 코드: %d\n", error);
     }
+}
+
+// Soft reset helper. We avoid toggling external power; perform a controlled reboot.
+// Uses the internal watchdog reboot for a clean reset of the RP2040.
+void reset(){
+    printf("reset(): initiating soft reboot via watchdog\n");
+    // small delay to flush output
+    sleep_ms(50);
+    // Reboot using watchdog: enable a very short timeout so the chip resets.
+    // This avoids calling watchdog_reboot() which may not be visible in this TU.
+    watchdog_enable(1, false); // 1 ms timeout
+    // wait briefly for the reset to happen
+    sleep_ms(100);
+    // fallback: infinite loop if reboot does not occur
+    while (true) tight_loop_contents();
+}
+
+// Hard-reset the attached ESP-01 by toggling the RST pin (active low).
+// This requires hardware connection: Pico GP2 -> ESP-01 RST.
+// Hold low for reset_hold_ms (ms), then release and wait post_wait_ms for the
+// ESP to boot and be ready for AT commands. Returns after waiting post_wait_ms.
+void hardReset(uint32_t reset_hold_ms = 200, uint32_t post_wait_ms = 1500){
+    // configure the pin as output and drive low
+    gpio_init(ESP01_RST_PIN);
+    gpio_set_dir(ESP01_RST_PIN, GPIO_OUT);
+    gpio_put(ESP01_RST_PIN, 0); // assert reset (active low)
+    printf("hardReset: asserted RST (GP%u) for %u ms\n", (unsigned)ESP01_RST_PIN, (unsigned)reset_hold_ms);
+    sleep_ms(reset_hold_ms);
+    // release reset (high-impedance or pull-up)
+    gpio_put(ESP01_RST_PIN, 1);
+    printf("hardReset: released RST, waiting %u ms for ESP to boot\n", (unsigned)post_wait_ms);
+    sleep_ms(post_wait_ms);
 }

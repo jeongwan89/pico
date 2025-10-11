@@ -24,9 +24,18 @@ static bool read_line_timeout(char *buf, size_t len, uint32_t timeout_ms){
             if (c == '\n'){
                 if (idx == 0) continue; // skip empty
                 buf[idx] = '\0';
+                // low-level RX log
+                printf("[ATRX] %s\n", buf);
                 return true;
             }
-            if (idx + 1 < len) buf[idx++] = (char)c;
+            if (idx + 1 < len) {
+                buf[idx++] = (char)c;
+            } else {
+                // buffer full: terminate and return to avoid overflow
+                buf[len-1] = '\0';
+                printf("[ATRX] <truncated> %s\n", buf);
+                return true;
+            }
         } else {
             sleep_ms(1);
         }
@@ -39,6 +48,8 @@ bool atmqtt_send_wait_ok(const char *cmd, uint32_t timeout_ms){
     // send with CRLF
     uart_puts(ESP01_UART, cmd);
     uart_puts(ESP01_UART, "\r\n");
+    // low-level TX log
+    printf("[ATTX] %s\n", cmd);
     char line[256];
     uint32_t start = to_ms_since_boot(get_absolute_time());
     while ((to_ms_since_boot(get_absolute_time()) - start) < timeout_ms){
@@ -105,8 +116,7 @@ void atmqtt_set_msg_callback(atmqtt_msg_cb_t cb){
 void atmqtt_process_io(){
     char line[512];
     while (read_line_timeout(line, sizeof(line), 10)){
-        // debug print of unsolicited line
-        printf("[ATRX] %s\n", line);
+    // debug print of unsolicited line (already logged in read_line_timeout)
         // simple disconnect detection: if device reports CLOSED or DISCONNECT or ERROR, mark disconnected
         if (strstr(line, "CLOSED") || strstr(line, "DISCONNECT") || strstr(line, "MQTTDISCONN") ){
             g_connected = false;
@@ -117,30 +127,50 @@ void atmqtt_process_io(){
             continue;
         }
         // handle several possible unsolicited formats
-        if (strstr(line, "+MQTTPUB:") || strstr(line, "+MQTTSUBRECV:") || strstr(line, "+MQTTSUB:") || strstr(line, "+MQTTMSG:")){
-            // Attempt to extract quoted strings: topic then payload
-            char *p = strchr(line, '"');
-            if (!p) continue;
-            char *q = strchr(p+1, '"');
-            if (!q) continue;
-            *q = '\0';
-            const char *topic = p+1;
-            // Look for next quoted string (payload). Some firmwares put payload after topic.
-            char *r = strchr(q+1, '"');
-            if (!r){
-                // payload might be unquoted and follow a comma - take remainder
-                char *comma = strchr(q+1, ',');
-                if (comma) {
-                    const char *payload = comma+1;
-                    if (g_msg_cb) g_msg_cb(topic, payload);
-                }
+        if (strstr(line, "+MQTTPUB:") || strstr(line, "+MQTTSUBRECV:") || strstr(line, "+MQTTSUB:") || strstr(line, "+MQTTMSG:") || strstr(line, "+MQTTPUBLISH:")){
+            // Try several possible formats. We'll look for quoted topic and then quoted payload.
+            // Examples seen in the wild:
+            // +MQTTPUB: <id>,"topic","payload"
+            // +MQTTSUBRECV: <id>,"topic","payload"
+            // +MQTTMSG: "topic",<len>,<payload>
+            const char *p1 = strchr(line, '"');
+            if (!p1){
+                // sometimes topic is unquoted after a comma
+                char *comma1 = strchr(line, ',');
+                if (!comma1) { printf("[ATPARSE] unhandled format: %s\n", line); continue; }
+                // skip comma and whitespace
+                char *tstart = comma1 + 1; while (*tstart == ' ' || *tstart == '\t') tstart++;
+                // topic until next comma
+                char *tend = strchr(tstart, ',');
+                if (!tend) { printf("[ATPARSE] unhandled format: %s\n", line); continue; }
+                *tend = '\0';
+                const char *topic = tstart;
+                const char *payload = tend + 1;
+                if (g_msg_cb) g_msg_cb(topic, payload);
                 continue;
             }
-            char *s = strchr(r+1, '"');
-            if (!s) continue;
-            *s = '\0';
-            const char *payload = r+1;
-            if (g_msg_cb) g_msg_cb(topic, payload);
+            char *q1 = strchr((char*)p1+1, '"');
+            if (!q1) { printf("[ATPARSE] malformed topic in: %s\n", line); continue; }
+            *q1 = '\0';
+            const char *topic = p1 + 1;
+            // look for payload as next quoted string
+            char *p2 = strchr(q1+1, '"');
+            if (p2){
+                char *q2 = strchr(p2+1, '"');
+                if (!q2) { printf("[ATPARSE] malformed payload in: %s\n", line); continue; }
+                *q2 = '\0';
+                const char *payload = p2 + 1;
+                if (g_msg_cb) g_msg_cb(topic, payload);
+                continue;
+            }
+            // fallback: payload may be after a comma or numeric length; take remainder
+            char *comma = strchr(q1+1, ',');
+            if (comma){
+                const char *payload = comma + 1;
+                if (g_msg_cb) g_msg_cb(topic, payload);
+                continue;
+            }
+            printf("[ATPARSE] could not extract payload from: %s\n", line);
         }
         // ignore other lines
     }

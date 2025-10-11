@@ -32,6 +32,8 @@ void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity);
 #define ESP01_TX_PIN 4
 #define ESP01_RX_PIN 5
 #define ESP01_BAUD 115200
+// ESP01 RST control pin (connect Pico GP2 -> ESP-01 RST)
+#define ESP01_RST_PIN 2
 
 // ESP-01 초기화 및 폴링 함수
 void esp01_init();
@@ -46,5 +48,8 @@ bool esp01_mqtt_setup(const char *host, int port, const char *username, const ch
 void esp01_print_msg_callback(const char *topic, const char *payload);
 // Maintain MQTT connection (call regularly). Returns true if connected.
 bool esp01_mqtt_maintain();
+
+// Hardware reset of ESP-01 RST line (Pico GP2)
+void hardReset(uint32_t reset_hold_ms, uint32_t post_wait_ms);
 
 // (No trailing markdown markers)

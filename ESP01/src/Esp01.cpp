@@ -17,6 +17,7 @@
 
 #include "DHT22.h"
 #include <stdio.h>
+#include <string.h>
 
 #include "blink.pio.h"
 void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
@@ -26,11 +27,16 @@ void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
     pio->txf[sm] = (125000000 / (2 * freq)) - 3;
 }
 
+// forward declaration for reset implemented in Esp01_util.cpp
+void reset();
+
 
 int main()
 {
     stdio_init_all();
 
+    // hardReset for ESP-01 to ensure it's in a known state
+    hardReset(200, 1500); // hold reset for 200ms, wait
     // Initialize ESP-01 UART
     esp01_init();
 
@@ -112,13 +118,46 @@ int main()
     static float humidity = 0.0f;
     static float temperature_c = 0.0f;
     while (true) {
-        printf("Hello, world!\n");
+        // printf("Hello, world!\n");
         // ESP-01 폴링: 수신 데이터가 있으면 처리
-    esp01_poll();
+        esp01_poll();
     // process ATMQTT incoming messages and invoke callback
     atmqtt_process_io();
     // maintain MQTT connection (reconnect if needed)
     esp01_mqtt_maintain();
+        // --- USB stdin command parser: non-blocking read of a line looking for "reset" ---
+        // USB stdin -> ESP-01 forwarding + line command parsing
+        static char cmdbuf[32] = {0};
+        static int cmdpos = 0;
+        int ch = getchar_timeout_us(0);
+        while (ch != PICO_ERROR_TIMEOUT) {
+            // Forward every received stdin character directly to the ESP-01 UART
+            if (ch >= 0) {
+                uart_putc_raw(ESP01_UART, (uint8_t)ch);
+            }
+
+            // Also accumulate characters to detect line commands (reset / hardreset)
+            if (ch == '\r' || ch == '\n') {
+                if (cmdpos > 0) {
+                    cmdbuf[cmdpos] = '\0';
+                    if (strcmp(cmdbuf, "reset") == 0) {
+                        // perform soft reset
+                        reset();
+                    } else if (strcmp(cmdbuf, "hardreset") == 0) {
+                        // perform hardware reset of ESP-01 via GP2
+                        printf("cmd: hardreset -> toggling ESP-01 RST\n");
+                        hardReset(200, 1500);
+                    } else {
+                        // non-control line: echo command to host for visibility
+                        printf("cmd: %s\n", cmdbuf);
+                    }
+                    cmdpos = 0;
+                }
+            } else if (cmdpos < (int)sizeof(cmdbuf)-1) {
+                cmdbuf[cmdpos++] = (char)ch;
+            }
+            ch = getchar_timeout_us(0);
+        }
         display.display_number(count); // 첫 번째 TM1637에 count 표시
         periodic_task(5000, callbackDHT, dht22, temperature_c, humidity); // 5초마다 센서값 갱신
         display2.display_float(humidity, 1); // 두 번째 TM1637에 습도 표시
