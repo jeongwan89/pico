@@ -46,6 +46,10 @@ pico_set_program_version(Esp01 "0.1")
 # Generate PIO header
 pico_generate_pio_header(Esp01 ${CMAKE_CURRENT_LIST_DIR}/src/blink.pio)
 
+# Option to enable low-level AT->MQTT debug logging (compile-time)
+option(ATMQTT_DEBUG "Enable AT->MQTT low-level debug logs (adds ATMQTT_DEBUG define)" OFF)
+
+
 # Modify the below lines to enable/disable output over UART/USB
 
 # enable stdio over UART/USB for the Esp01 target
@@ -72,4 +76,9 @@ target_include_directories(Esp01 PRIVATE
 )
 
 pico_add_extra_outputs(Esp01)
+
+if(ATMQTT_DEBUG)
+    message(STATUS "ATMQTT_DEBUG enabled: adding ATMQTT_DEBUG compile definition")
+    target_compile_definitions(Esp01 PRIVATE ATMQTT_DEBUG)
+endif()
 

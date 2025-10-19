@@ -13,5 +13,52 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
             }
         }
+        ,
+        {
+            "name": "build",
+            "displayName": "Generate build files into ./build",
+            "description": "Compatibility preset for tools expecting ./build (Ninja)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "PICO_COMPILER": "pico_arm_cortex_m0plus_gcc",
+                "PICO_TOOLCHAIN_PATH": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1",
+                "CMAKE_C_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc",
+                "CMAKE_CXX_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-g++",
+                "CMAKE_ASM_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc"
+            }
+        }
+        ,
+        {
+            "name": "debug-atmqtt",
+            "displayName": "Debug build with ATMQTT_DEBUG=ON",
+            "description": "Configure with ATMQTT_DEBUG enabled so low-level AT logs are compiled in.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-debug-atmqtt",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "PICO_COMPILER": "pico_arm_cortex_m0plus_gcc",
+                "PICO_TOOLCHAIN_PATH": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1",
+                "CMAKE_C_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc",
+                "CMAKE_CXX_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-g++",
+                "CMAKE_ASM_COMPILER": "/home/kjw/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc",
+                "ATMQTT_DEBUG": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "build",
+            "configurePreset": "build"
+        },
+        {
+            "name": "debug-atmqtt",
+            "configurePreset": "debug-atmqtt"
+        }
     ]
 }

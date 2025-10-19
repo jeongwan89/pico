@@ -9,6 +9,13 @@
 static atmqtt_msg_cb_t g_msg_cb = NULL;
 static bool g_connected = false;
 
+// Debug macro: compile-time control via ATMQTT_DEBUG
+#ifdef ATMQTT_DEBUG
+#define ATM_DEBUG(fmt, ...) do { printf(fmt "\n", ##__VA_ARGS__); } while(0)
+#else
+#define ATM_DEBUG(fmt, ...) do { } while(0)
+#endif
+
 void atmqtt_init(){
     // ensure UART is configured (esp01_init should have been called)
     // nothing to do here for now
@@ -25,7 +32,7 @@ static bool read_line_timeout(char *buf, size_t len, uint32_t timeout_ms){
                 if (idx == 0) continue; // skip empty
                 buf[idx] = '\0';
                 // low-level RX log
-                printf("[ATRX] %s\n", buf);
+                ATM_DEBUG("[ATRX] %s", buf);
                 return true;
             }
             if (idx + 1 < len) {
@@ -49,7 +56,7 @@ bool atmqtt_send_wait_ok(const char *cmd, uint32_t timeout_ms){
     uart_puts(ESP01_UART, cmd);
     uart_puts(ESP01_UART, "\r\n");
     // low-level TX log
-    printf("[ATTX] %s\n", cmd);
+    ATM_DEBUG("[ATTX] %s", cmd);
     char line[256];
     uint32_t start = to_ms_since_boot(get_absolute_time());
     while ((to_ms_since_boot(get_absolute_time()) - start) < timeout_ms){

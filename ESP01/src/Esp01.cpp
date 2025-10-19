@@ -36,13 +36,13 @@ int main()
     stdio_init_all();
 
     // hardReset for ESP-01 to ensure it's in a known state
-    hardReset(200, 1500); // hold reset for 200ms, wait
+    hardReset(200,  3000); // hold reset for 200ms, wait
     // Initialize ESP-01 UART
     esp01_init();
 
     // Try to connect to WiFi via ESP-01 (blocking call)
-    // SSID: farmmain5G, password: wweerrtt
-    if (esp01_wifi_connect("farmmain5G", "wweerrtt", 20000)) {
+    // SSID: FarmMain5G, password: wweerrtt
+    if (esp01_wifi_connect("FarmMain5G", "wweerrtt", 20000)) {
         printf("ESP01 WiFi connected (attempt returned success)\n");
         // After WiFi is up, configure MQTT and subscribe to topics
         const char *topics[] = {
@@ -117,14 +117,16 @@ int main()
     int count = 0;
     static float humidity = 0.0f;
     static float temperature_c = 0.0f;
+    
+
     while (true) {
         // printf("Hello, world!\n");
         // ESP-01 폴링: 수신 데이터가 있으면 처리
         esp01_poll();
-    // process ATMQTT incoming messages and invoke callback
-    atmqtt_process_io();
-    // maintain MQTT connection (reconnect if needed)
-    esp01_mqtt_maintain();
+        // process ATMQTT incoming messages and invoke callback
+        atmqtt_process_io();
+        // maintain MQTT connection (reconnect if needed)
+        esp01_mqtt_maintain();
         // --- USB stdin command parser: non-blocking read of a line looking for "reset" ---
         // USB stdin -> ESP-01 forwarding + line command parsing
         static char cmdbuf[32] = {0};

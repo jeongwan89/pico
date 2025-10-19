@@ -19,7 +19,7 @@
 // 타입 정의
 typedef void (*timer_callback_t)(DHT22 &dht, float &temperature_c, float &humidity);
 
-// 함수 선언
+// 함수 선언 0
 int periodic_task(uint32_t interval_ms, timer_callback_t callback_DHT, DHT22 &dht, float &temperature_c, float &humidity);
 void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq);
 void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity);
@@ -29,9 +29,9 @@ void callbackDHT(DHT22 &dht, float &temperature_c, float &humidity);
 // 하드웨어 연결: ESP-01 RX -> Pico GP4 (UART1 TX), ESP-01 TX -> Pico GP5 (UART1 RX)
 // (즉, ESP RX <--- Pico TX(GP4), ESP TX ---> Pico RX(GP5))
 #define ESP01_UART uart1
-#define ESP01_TX_PIN 4
-#define ESP01_RX_PIN 5
-#define ESP01_BAUD 115200
+#define ESP01_TX_PIN 5
+#define ESP01_RX_PIN 4
+#define ESP01_BAUD 57600
 // ESP01 RST control pin (connect Pico GP2 -> ESP-01 RST)
 #define ESP01_RST_PIN 2
 
@@ -46,7 +46,9 @@ bool esp01_wifi_connect(const char *ssid, const char *password, uint32_t timeout
 bool esp01_mqtt_setup(const char *host, int port, const char *username, const char *password, const char *topics[], int topic_count);
 // message callback used by main to print incoming MQTT messages
 void esp01_print_msg_callback(const char *topic, const char *payload);
-// Maintain MQTT connection (call regularly). Returns true if connected.
+// Maintain MQTT connection (call frequently from the main loop). Non-blocking
+// state machine; returns true when currently connected. The function will
+// attempt reconnects/backoff/and topic re-subscription asynchronously.
 bool esp01_mqtt_maintain();
 
 // Hardware reset of ESP-01 RST line (Pico GP2)
