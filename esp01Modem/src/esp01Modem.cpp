@@ -6,6 +6,7 @@
 #include "hardware/pio.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
+#include "pico/time.h"
 
 #include "cpp/esp01_wrapper.hpp"
 #include "cpp/mqtt_wrapper.hpp"
@@ -94,6 +95,13 @@ public:
         int linelen = 0;
         int cur = 0; // cursor position within line
         static uint32_t last = 0;
+    // echo suppression using expected-length matching: when we send a line we expect
+    // the modem to echo the same bytes back; we collect incoming bytes into a small
+    // buffer and if the first N bytes equal the sent payload+CRLF, we drop them.
+    char expect_buf[512];
+    int expect_len = 0;      // how many bytes we expect (sent length + CRLF)
+    int expect_filled = 0;   // how many bytes currently collected
+    uint64_t expect_deadline = 0; // microseconds timestamp to abandon expectation
 
         auto redraw = [&](void) {
             // redraw the whole input line and position cursor at 'cur'
@@ -125,12 +133,76 @@ public:
                         // else ignore other sequences
                     }
                 } else if (ch == '\r' || ch == '\n') {
-                    // Send buffered line to UART with CRLF
+                    // Send buffered line to UART with CRLF and then synchronously
+                    // capture the modem response for a short timeout. This approach
+                    // collects the raw response and strips occurrences of the
+                    // echoed command so the host sees only the modem reply.
                     for (int i = 0; i < linelen; ++i) uart_putc_raw(u, linebuf[i]);
                     uart_putc_raw(u, '\r');
                     uart_putc_raw(u, '\n');
-                    // Echo newline on host and reset buffer
+
+                    // Echo newline locally
                     putchar('\r'); putchar('\n');
+
+                    // prepare pattern to strip (line + CRLF)
+                    char pattern[300];
+                    int patlen = 0;
+                    int copy_len = linelen;
+                    if (copy_len > (int)sizeof(pattern) - 3) copy_len = (int)sizeof(pattern) - 3;
+                    for (int i = 0; i < copy_len; ++i) pattern[patlen++] = linebuf[i];
+                    pattern[patlen++] = '\r'; pattern[patlen++] = '\n';
+
+                    // set expect buffer so concurrent UART reads can drop echoed bytes
+                    if (patlen < (int)sizeof(expect_buf)) {
+                        memcpy(expect_buf, pattern, patlen);
+                        expect_len = patlen;
+                        expect_filled = 0;
+                        expect_deadline = time_us_64() + 2000 * 1000ULL; // 2s expectation window
+                    }
+
+                    // capture response into buffer for up to 2500 ms
+                    char resp[4096];
+                    int rlen = 0;
+                    uint64_t deadline = time_us_64() + 2500 * 1000ULL;
+                    while (time_us_64() < deadline && rlen < (int)sizeof(resp) - 1) {
+                        if (uart_is_readable(u)) {
+                            int c = uart_getc(u);
+                            if (c < 0) continue;
+                            resp[rlen++] = (char)c;
+                            // optional fast exit if we see OK or ERROR sequence
+                            if (rlen >= 4) {
+                                resp[rlen] = '\0';
+                                if (strstr(resp, "OK") || strstr(resp, "ERROR")) break;
+                            }
+                        } else {
+                            sleep_us(500);
+                        }
+                    }
+                    resp[rlen] = '\0';
+
+                    // remove occurrences of pattern from resp
+                    if (rlen > 0) {
+                        // 1) naive direct removal of exact occurrences
+                        for (int i = 0; i < rlen; ) {
+                            if (i + patlen <= rlen && patlen > 0 && memcmp(&resp[i], pattern, patlen) == 0) {
+                                i += patlen;
+                                continue;
+                            }
+                            putchar(resp[i]);
+                            i++;
+                        }
+
+                        // 2) additional pass: remove occurrences where the modem echoed
+                        // the command with interleaved CR/LF characters. We scan the
+                        // response and skip sequences that match the pattern while
+                        // allowing '\r'/'\n' anywhere between pattern characters.
+                        // Build a normalized output by walking the buffer.
+                        // (This is conservative: we only remove exact char sequence
+                        // matches allowing CR/LF between bytes.)
+                        // To avoid double-printing in the simple pass above, this
+                        // additional heuristic is skipped (kept for future use).
+                    }
+
                     linelen = 0; cur = 0;
                 } else if (ch == 8 || ch == 127) {
                     // Backspace: remove char before cursor
@@ -150,10 +222,47 @@ public:
                 }
             }
 
-            // read from UART and print to stdout
+            // read from UART and buffer for echo-suppression
             while (uart_is_readable(u)) {
                 int c = uart_getc(u);
-                if (c >= 0) putchar(c);
+                if (c < 0) continue;
+                if (expect_len > 0 && expect_filled < expect_len) {
+                    // collect into a temporary buffer in place (we already filled expect_buf with expected sequence,
+                    // so use a separate temp area pinned after expect_len)
+                    // We'll temporarily use a small window starting at index expect_len to store collected bytes.
+                    int store_idx = expect_len + expect_filled;
+                    if (store_idx < (int)sizeof(expect_buf)) {
+                        expect_buf[store_idx] = (char)c;
+                        expect_filled++;
+                    } else {
+                        // buffer overflow — give up expectation and flush what we have
+                        for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
+                        expect_len = 0; expect_filled = 0; expect_deadline = 0;
+                        putchar(c);
+                    }
+                    // if we've filled the expected amount, compare
+                    if (expect_filled >= expect_len) {
+                        bool match = true;
+                        for (int i = 0; i < expect_len; ++i) {
+                            if (expect_buf[i] != expect_buf[expect_len + i]) { match = false; break; }
+                        }
+                        if (match) {
+                            // drop them
+                        } else {
+                            // flush collected bytes then print nothing special
+                            for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
+                        }
+                        // reset expectation after handling
+                        expect_len = 0; expect_filled = 0; expect_deadline = 0;
+                    }
+                } else {
+                    putchar(c);
+                }
+            }
+            // abort expectation on timeout and flush any collected bytes
+            if (expect_len > 0 && time_us_64() > expect_deadline) {
+                for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
+                expect_len = 0; expect_filled = 0; expect_deadline = 0;
             }
 
             // heartbeat display update once per second

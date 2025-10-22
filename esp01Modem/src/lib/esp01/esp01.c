@@ -58,11 +58,33 @@ bool esp01_init(esp01_t *m) {
         printf("esp01_init: AT no response\n");
         // still continue to try disabling echo
     }
-    // Disable echo
+    // Disable echo: send ATE0, wait, then send again if necessary and perform
+    // a longer drain to ensure any echoed bytes are consumed before returning.
     esp01_send_cmd(m->uart, "ATE0");
     if (!esp01_expect_ok(m->uart, 1000)) {
-        printf("esp01_init: failed to disable echo\n");
-        // not fatal
+        // retry once more before giving up
+        esp01_send_cmd(m->uart, "ATE0");
+        if (!esp01_expect_ok(m->uart, 1000)) {
+            printf("esp01_init: failed to disable echo\n");
+        }
+    }
+
+    // Drain residual bytes robustly: read and discard until we see no bytes for
+    // a short quiet period, or until overall timeout. This handles fragmented
+    // echoes that can arrive after the OK reply.
+    uint64_t overall_deadline = time_us_64() + 800 * 1000ULL; // total 800ms max
+    uint64_t quiet_deadline = 0;
+    while (time_us_64() < overall_deadline) {
+        if (uart_is_readable(m->uart)) {
+            int c = uart_getc(m->uart);
+            (void)c;
+            // push quiet_deadline forward when we see data
+            quiet_deadline = time_us_64() + 80 * 1000ULL; // require 80ms quiet
+        } else {
+            // if we've had a short quiet period, assume no more residual bytes
+            if (quiet_deadline != 0 && time_us_64() > quiet_deadline) break;
+            sleep_us(500);
+        }
     }
     // Return true even if limited; full connectivity depends on WiFi join
     return true;
