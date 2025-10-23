@@ -13,6 +13,13 @@ public:
         wifi_config_t cfg{ssid.c_str(), pass.c_str()};
         return esp01_join_wifi(&m_, &cfg);
     }
+    void register_global() { esp01_register_global(&m_); }
+    bool getIP(std::string &out) {
+        char buf[128];
+        bool r = esp01_get_ip(&m_, buf, sizeof(buf), 2000);
+        if (r) out = std::string(buf);
+        return r;
+    }
 private:
     esp01_t m_;
 };

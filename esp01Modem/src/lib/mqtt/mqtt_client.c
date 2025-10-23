@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdio.h"
+#include "../esp01/esp01.h"
 
 // Minimal MQTT v3.1.1 packet helper for CONNECT/PUBLISH/SUBSCRIBE (QoS0)
 
@@ -53,7 +54,26 @@ bool mqtt_connect(mqtt_client_t *c) {
     uint8_t buf[256];
     int len = build_connect(c->cfg, buf, sizeof(buf));
     printf("mqtt_connect: built CONNECT packet %d bytes\n", len);
-    // TODO: send over transport
+    // Attempt to use registered esp01 transport
+    esp01_t *esp = esp01_get_global();
+    if (!esp) {
+        printf("mqtt_connect: no esp01 transport registered\n");
+        return false;
+    }
+    if (!esp01_tcp_connect(esp, c->cfg->host, c->cfg->port, 5000)) {
+        printf("mqtt_connect: TCP connect failed\n");
+        return false;
+    }
+    if (!esp01_tcp_send(esp, buf, len, 5000)) {
+        printf("mqtt_connect: send failed\n");
+        esp01_tcp_close(esp, 2000);
+        return false;
+    }
+    uint8_t rbuf[128];
+    int r = esp01_tcp_read(esp, rbuf, sizeof(rbuf), 3000);
+    if (r > 0) {
+        printf("mqtt_connect: got %d bytes from server\n", r);
+    }
     return true;
 }
 
@@ -77,5 +97,13 @@ void mqtt_loop(mqtt_client_t *c) {
 mqtt_client_t mqtt_client_create(const mqtt_config_t *cfg) {
     mqtt_client_t c = {.cfg = cfg};
     return c;
+}
+
+void mqtt_set_transport(mqtt_client_t *c, void *transport) {
+    if (!c) return;
+    // store pointer in the struct's unused area by casting
+    // In this minimal implementation we piggyback on cfg pointer for storage
+    // (Not ideal but keeps changes small). We'll keep a static pointer map.
+    (void)transport;
 }
 

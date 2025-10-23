@@ -83,187 +83,76 @@ public:
         if (!modem_.init()) {
             printf("ESP01 init failed\n");
         }
+        // register global transport for mqtt client code
+        modem_.register_global();
+
+        // Ensure Wi-Fi is connected: attempt join until AT+CIFSR returns an IP
+        char ipbuf[64] = {0};
+        std::string ipstr;
+        int retry = 0;
+        while (true) {
+            if (modem_.getIP(ipstr)) {
+                strncpy(ipbuf, ipstr.c_str(), sizeof(ipbuf)-1);
+                printf("Got IP: %s\n", ipbuf);
+                display_.show("IPOK");
+                break;
+            }
+            printf("WiFi not up yet, attempting join to %s (attempt %d)\n", WIFI_SSID, retry+1);
+            if (!modem_.joinWifi(WIFI_SSID, WIFI_PASSWORD)) {
+                printf("joinWifi failed\n");
+            } else {
+                printf("joinWifi returned, waiting for IP...\n");
+            }
+            // exponential backoff up to 16s
+            int backoff = 2000 * (1 << (retry > 4 ? 4 : retry));
+            if (backoff > 16000) backoff = 16000;
+            sleep_ms(backoff);
+            retry++;
+        }
+
+        // Build client_id with persistent storage in this App instance
+        uint32_t r = (uint32_t) (to_ms_since_boot(get_absolute_time()) ^ (uint32_t)(uintptr_t)&r);
+        char cidbuf[256];
+        snprintf(cidbuf, sizeof(cidbuf), "%s-%08x", MQTT_CLIENT_ID, (unsigned)r);
+        client_id_str_ = std::string(cidbuf);
+        cfg_.client_id = client_id_str_.c_str();
 
         // Prepare MQTT wrapper
         mqtt_ = std::make_unique<net::MqttClient>(cfg_);
+
+        // Attempt MQTT connect with exponential backoff, update display
+        int mretry = 0;
+        while (true) {
+            printf("Attempting MQTT connect (attempt %d)\n", mretry+1);
+            display_.show("MQTT");
+            if (mqtt_->connect()) {
+                printf("MQTT connected\n");
+                display_.show("OK  ");
+                break;
+            }
+            printf("MQTT connect failed\n");
+            int backoff = 1000 * (1 << (mretry > 6 ? 6 : mretry));
+            if (backoff > 32000) backoff = 32000;
+            sleep_ms(backoff);
+            mretry++;
+        }
     }
 
     void run() {
-        // Line-based forwarding: collect a line from stdin, on Enter send line + CRLF to UART
+        // Simplified main loop: drop any UART bytes coming from ESP, run MQTT loop,
+        // and update display. The interactive serial-forwarding functionality was
+        // intentionally removed as it's no longer needed.
         uart_inst_t* u = UART_ID;
-        char linebuf[256];
-        int linelen = 0;
-        int cur = 0; // cursor position within line
         static uint32_t last = 0;
-    // echo suppression using expected-length matching: when we send a line we expect
-    // the modem to echo the same bytes back; we collect incoming bytes into a small
-    // buffer and if the first N bytes equal the sent payload+CRLF, we drop them.
-    char expect_buf[512];
-    int expect_len = 0;      // how many bytes we expect (sent length + CRLF)
-    int expect_filled = 0;   // how many bytes currently collected
-    uint64_t expect_deadline = 0; // microseconds timestamp to abandon expectation
-
-        auto redraw = [&](void) {
-            // redraw the whole input line and position cursor at 'cur'
-            putchar('\r');
-            // print buffer
-            for (int i = 0; i < linelen; ++i) putchar(linebuf[i]);
-            // clear one extra char to erase leftovers
-            putchar(' ');
-            // return carriage and move cursor to current position
-            putchar('\r');
-            for (int i = 0; i < cur; ++i) putchar(linebuf[i]);
-        };
-
         while (true) {
-            int ch = getchar_timeout_us(0);
-            if (ch != PICO_ERROR_TIMEOUT) {
-                if (ch == 27) {
-                    // possible escape sequence for arrow keys
-                    int c1 = getchar_timeout_us(1000);
-                    if (c1 == '[') {
-                        int c2 = getchar_timeout_us(1000);
-                        if (c2 == 'D') {
-                            // left
-                            if (cur > 0) { cur--; redraw(); }
-                        } else if (c2 == 'C') {
-                            // right
-                            if (cur < linelen) { cur++; redraw(); }
-                        }
-                        // else ignore other sequences
-                    }
-                } else if (ch == '\r' || ch == '\n') {
-                    // Send buffered line to UART with CRLF and then synchronously
-                    // capture the modem response for a short timeout. This approach
-                    // collects the raw response and strips occurrences of the
-                    // echoed command so the host sees only the modem reply.
-                    for (int i = 0; i < linelen; ++i) uart_putc_raw(u, linebuf[i]);
-                    uart_putc_raw(u, '\r');
-                    uart_putc_raw(u, '\n');
-
-                    // Echo newline locally
-                    putchar('\r'); putchar('\n');
-
-                    // prepare pattern to strip (line + CRLF)
-                    char pattern[300];
-                    int patlen = 0;
-                    int copy_len = linelen;
-                    if (copy_len > (int)sizeof(pattern) - 3) copy_len = (int)sizeof(pattern) - 3;
-                    for (int i = 0; i < copy_len; ++i) pattern[patlen++] = linebuf[i];
-                    pattern[patlen++] = '\r'; pattern[patlen++] = '\n';
-
-                    // set expect buffer so concurrent UART reads can drop echoed bytes
-                    if (patlen < (int)sizeof(expect_buf)) {
-                        memcpy(expect_buf, pattern, patlen);
-                        expect_len = patlen;
-                        expect_filled = 0;
-                        expect_deadline = time_us_64() + 2000 * 1000ULL; // 2s expectation window
-                    }
-
-                    // capture response into buffer for up to 2500 ms
-                    char resp[4096];
-                    int rlen = 0;
-                    uint64_t deadline = time_us_64() + 2500 * 1000ULL;
-                    while (time_us_64() < deadline && rlen < (int)sizeof(resp) - 1) {
-                        if (uart_is_readable(u)) {
-                            int c = uart_getc(u);
-                            if (c < 0) continue;
-                            resp[rlen++] = (char)c;
-                            // optional fast exit if we see OK or ERROR sequence
-                            if (rlen >= 4) {
-                                resp[rlen] = '\0';
-                                if (strstr(resp, "OK") || strstr(resp, "ERROR")) break;
-                            }
-                        } else {
-                            sleep_us(500);
-                        }
-                    }
-                    resp[rlen] = '\0';
-
-                    // remove occurrences of pattern from resp
-                    if (rlen > 0) {
-                        // 1) naive direct removal of exact occurrences
-                        for (int i = 0; i < rlen; ) {
-                            if (i + patlen <= rlen && patlen > 0 && memcmp(&resp[i], pattern, patlen) == 0) {
-                                i += patlen;
-                                continue;
-                            }
-                            putchar(resp[i]);
-                            i++;
-                        }
-
-                        // 2) additional pass: remove occurrences where the modem echoed
-                        // the command with interleaved CR/LF characters. We scan the
-                        // response and skip sequences that match the pattern while
-                        // allowing '\r'/'\n' anywhere between pattern characters.
-                        // Build a normalized output by walking the buffer.
-                        // (This is conservative: we only remove exact char sequence
-                        // matches allowing CR/LF between bytes.)
-                        // To avoid double-printing in the simple pass above, this
-                        // additional heuristic is skipped (kept for future use).
-                    }
-
-                    linelen = 0; cur = 0;
-                } else if (ch == 8 || ch == 127) {
-                    // Backspace: remove char before cursor
-                    if (cur > 0) {
-                        memmove(&linebuf[cur-1], &linebuf[cur], linelen - cur);
-                        linelen--; cur--;
-                        redraw();
-                    }
-                } else if (ch >= 32 && ch < 127) {
-                    // printable char: insert at cursor
-                    if (linelen < (int)sizeof(linebuf) - 1) {
-                        memmove(&linebuf[cur+1], &linebuf[cur], linelen - cur);
-                        linebuf[cur] = (char)ch;
-                        linelen++; cur++;
-                        redraw();
-                    }
-                }
-            }
-
-            // read from UART and buffer for echo-suppression
+            // drain UART input to avoid buffer growth
             while (uart_is_readable(u)) {
                 int c = uart_getc(u);
-                if (c < 0) continue;
-                if (expect_len > 0 && expect_filled < expect_len) {
-                    // collect into a temporary buffer in place (we already filled expect_buf with expected sequence,
-                    // so use a separate temp area pinned after expect_len)
-                    // We'll temporarily use a small window starting at index expect_len to store collected bytes.
-                    int store_idx = expect_len + expect_filled;
-                    if (store_idx < (int)sizeof(expect_buf)) {
-                        expect_buf[store_idx] = (char)c;
-                        expect_filled++;
-                    } else {
-                        // buffer overflow — give up expectation and flush what we have
-                        for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
-                        expect_len = 0; expect_filled = 0; expect_deadline = 0;
-                        putchar(c);
-                    }
-                    // if we've filled the expected amount, compare
-                    if (expect_filled >= expect_len) {
-                        bool match = true;
-                        for (int i = 0; i < expect_len; ++i) {
-                            if (expect_buf[i] != expect_buf[expect_len + i]) { match = false; break; }
-                        }
-                        if (match) {
-                            // drop them
-                        } else {
-                            // flush collected bytes then print nothing special
-                            for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
-                        }
-                        // reset expectation after handling
-                        expect_len = 0; expect_filled = 0; expect_deadline = 0;
-                    }
-                } else {
-                    putchar(c);
-                }
+                (void)c;
             }
-            // abort expectation on timeout and flush any collected bytes
-            if (expect_len > 0 && time_us_64() > expect_deadline) {
-                for (int i = 0; i < expect_filled; ++i) putchar(expect_buf[expect_len + i]);
-                expect_len = 0; expect_filled = 0; expect_deadline = 0;
-            }
+
+            // run mqtt background processing if available
+            if (mqtt_) mqtt_->loop();
 
             // heartbeat display update once per second
             uint32_t now = to_ms_since_boot(get_absolute_time());
@@ -281,6 +170,7 @@ private:
     modem::Esp01 modem_;
     mqtt_config_t cfg_{};
     std::unique_ptr<net::MqttClient> mqtt_;
+    std::string client_id_str_;
 };
 }
 

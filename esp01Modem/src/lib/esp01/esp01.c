@@ -2,6 +2,7 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "pico/time.h"
 
 esp01_t esp01_create(uart_inst_t *uart) {
@@ -100,5 +101,97 @@ bool esp01_join_wifi(esp01_t *m, const wifi_config_t *cfg) {
         printf("esp01_join_wifi: join failed or timeout\n");
         return false;
     }
+    return true;
+}
+
+// --- TCP transport helpers ---
+// Send AT+CIPSTART="TCP","host",port
+bool esp01_tcp_connect(esp01_t *m, const char *host, int port, uint32_t timeout_ms) {
+    if (!m || !m->uart || !host) return false;
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "AT+CIPSTART=\"TCP\",\"%s\",%d", host, port);
+    esp01_send_cmd(m->uart, cmd);
+    return esp01_expect_ok(m->uart, timeout_ms);
+}
+
+// Send raw bytes using AT+CIPSEND length then data
+bool esp01_tcp_send(esp01_t *m, const uint8_t *data, int len, uint32_t timeout_ms) {
+    if (!m || !m->uart || !data || len <= 0) return false;
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%d", len);
+    esp01_send_cmd(m->uart, cmd);
+    // wait for '>' prompt
+    char resp[128];
+    int r = esp01_read_response(m->uart, resp, sizeof(resp), 1000);
+    if (r <= 0 || strchr(resp, '>') == NULL) {
+        return false;
+    }
+    // write raw data
+    for (int i = 0; i < len; ++i) uart_putc_raw(m->uart, data[i]);
+    // after send, wait for SEND OK
+    return esp01_expect_ok(m->uart, timeout_ms);
+}
+
+int esp01_tcp_read(esp01_t *m, uint8_t *buf, int maxlen, uint32_t timeout_ms) {
+    if (!m || !m->uart || !buf || maxlen <= 0) return -1;
+    // The ESP sends +IPD,len:payload. We'll read until timeout and try to
+    // extract payload occurrences. This is a simple parser for small payloads.
+    char tmp[1024];
+    int rd = esp01_read_response(m->uart, tmp, sizeof(tmp), timeout_ms);
+    if (rd <= 0) return 0;
+    // search for +IPD,
+    char *p = strstr(tmp, "+IPD,");
+    if (!p) {
+        // maybe raw data without prefix
+        int copy = rd < maxlen ? rd : maxlen;
+        memcpy(buf, tmp, copy);
+        return copy;
+    }
+    // parse length
+    p += 5;
+    int len = atoi(p);
+    // find ':' after length
+    char *col = strchr(p, ':');
+    if (!col) return 0;
+    char *payload = col + 1;
+    int avail = rd - (payload - tmp);
+    int copy = avail < len ? avail : len;
+    if (copy > maxlen) copy = maxlen;
+    memcpy(buf, payload, copy);
+    return copy;
+}
+
+bool esp01_tcp_close(esp01_t *m, uint32_t timeout_ms) {
+    if (!m || !m->uart) return false;
+    esp01_send_cmd(m->uart, "AT+CIPCLOSE");
+    return esp01_expect_ok(m->uart, timeout_ms);
+}
+
+// global registration
+static esp01_t* g_esp = NULL;
+void esp01_register_global(esp01_t *m) {
+    g_esp = m;
+}
+esp01_t* esp01_get_global(void) {
+    return g_esp;
+}
+
+bool esp01_get_ip(esp01_t *m, char *out, int maxlen, uint32_t timeout_ms) {
+    if (!m || !m->uart || !out || maxlen <= 0) return false;
+    esp01_send_cmd(m->uart, "AT+CIFSR");
+    char buf[256];
+    int n = esp01_read_response(m->uart, buf, sizeof(buf), timeout_ms);
+    if (n <= 0) return false;
+    // Look for an IPv4-like sequence
+    char *p = strstr(buf, "192.");
+    if (!p) p = strstr(buf, "10.");
+    if (!p) p = strstr(buf, "172.");
+    if (!p) return false;
+    // copy until non-printable or newline
+    int i = 0;
+    while (i < maxlen - 1 && p[i] && p[i] != '\r' && p[i] != '\n') {
+        out[i] = p[i]; i++;
+    }
+    out[i] = '\0';
     return true;
 }

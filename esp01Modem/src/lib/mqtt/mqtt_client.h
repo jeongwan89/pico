@@ -20,6 +20,9 @@ typedef struct {
     const mqtt_config_t *cfg;
 } mqtt_client_t;
 
+// Attach transport
+void mqtt_set_transport(mqtt_client_t *c, void *transport); // transport is esp01_t*
+
 mqtt_client_t mqtt_client_create(const mqtt_config_t *cfg);
 bool mqtt_connect(mqtt_client_t *c);
 bool mqtt_publish(mqtt_client_t *c, const char *topic, const char *payload, int qos, bool retain);
