@@ -1,0 +1,10 @@
+esp01_expect_ok: resp='
+WIFI DISCONNECT
+WIFI CONNECTED
+WIFI DISCONNECT
++CWJAP:1
+
+ERROR'
+esp01_join_wifi: join attempt 1 failed or timeout
+esp01_join_wifi: attempting join (attempt 2/3)
+esp01_send_cmd: AT+CWJAP="FarmMain5G","wweerrtt"

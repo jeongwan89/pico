@@ -15,6 +15,9 @@ public:
     bool subscribe(const std::string& topic, int qos = 0) {
         return mqtt_subscribe(&c_, topic.c_str(), qos);
     }
+    void set_callback(void (*cb)(const char *topic, const char *payload)) {
+        mqtt_set_message_callback(&c_, cb);
+    }
     void loop() { mqtt_loop(&c_); }
 private:
     mqtt_config_t cfg_;

@@ -18,6 +18,8 @@ static void esp01_write(uart_inst_t *u, const char *s) {
 
 // send command with CRLF
 static void esp01_send_cmd(uart_inst_t *u, const char *cmd) {
+    // debug: echo the command being sent to host serial
+    printf("esp01_send_cmd: %s\n", cmd);
     esp01_write(u, cmd);
     esp01_write(u, "\r\n");
 }
@@ -47,33 +49,45 @@ static int esp01_read_response(uart_inst_t *u, char *buf, int maxlen, uint32_t t
 static bool esp01_expect_ok(uart_inst_t *u, uint32_t timeout_ms) {
     char resp[256];
     esp01_read_response(u, resp, sizeof(resp), timeout_ms);
-    // printf("ESP resp: %s\n", resp);
+    // always print the raw response for debugging
+    printf("esp01_expect_ok: resp='%s'\n", resp);
     return strstr(resp, "OK") != NULL;
 }
 
 bool esp01_init(esp01_t *m) {
     if (!m || !m->uart) return false;
     // simple AT check
-    esp01_send_cmd(m->uart, "AT");
-    if (!esp01_expect_ok(m->uart, 1000)) {
-        printf("esp01_init: AT no response\n");
-        // still continue to try disabling echo
+    // try AT up to a few times with increasing timeouts
+    bool at_ok = false;
+    const int at_attempts = 3;
+    uint32_t at_timeouts[at_attempts];
+    at_timeouts[0] = 2000;
+    at_timeouts[1] = 3000;
+    at_timeouts[2] = 5000;
+    for (int i = 0; i < at_attempts; ++i) {
+        esp01_send_cmd(m->uart, "AT");
+        if (esp01_expect_ok(m->uart, at_timeouts[i])) { at_ok = true; break; }
+        printf("esp01_init: AT attempt %d failed\n", i+1);
+        sleep_ms(200);
+    }
+    if (!at_ok) {
+        printf("esp01_init: AT no response after retries\n");
     }
     // Disable echo: send ATE0, wait, then send again if necessary and perform
     // a longer drain to ensure any echoed bytes are consumed before returning.
-    esp01_send_cmd(m->uart, "ATE0");
-    if (!esp01_expect_ok(m->uart, 1000)) {
-        // retry once more before giving up
+    bool ate0_ok = false;
+    for (int i = 0; i < 3; ++i) {
         esp01_send_cmd(m->uart, "ATE0");
-        if (!esp01_expect_ok(m->uart, 1000)) {
-            printf("esp01_init: failed to disable echo\n");
-        }
+        if (esp01_expect_ok(m->uart, 2000)) { ate0_ok = true; break; }
+        printf("esp01_init: ATE0 attempt %d failed\n", i+1);
+        sleep_ms(100);
     }
+    if (!ate0_ok) printf("esp01_init: failed to disable echo after retries\n");
 
     // Drain residual bytes robustly: read and discard until we see no bytes for
     // a short quiet period, or until overall timeout. This handles fragmented
     // echoes that can arrive after the OK reply.
-    uint64_t overall_deadline = time_us_64() + 800 * 1000ULL; // total 800ms max
+    uint64_t overall_deadline = time_us_64() + 1500 * 1000ULL; // total 1500ms max
     uint64_t quiet_deadline = 0;
     while (time_us_64() < overall_deadline) {
         if (uart_is_readable(m->uart)) {
@@ -96,12 +110,56 @@ bool esp01_join_wifi(esp01_t *m, const wifi_config_t *cfg) {
     char cmd[256];
     // Format: AT+CWJAP="ssid","pwd"
     snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%s\"", cfg->ssid, cfg->password);
+    // Send join and then stream responses for an extended period to catch
+    // event-based replies like "WIFI CONNECTED", "WIFI GOT IP", "+CWJAP:x" etc.
+    printf("esp01_join_wifi: attempting join to %s\n", cfg->ssid);
     esp01_send_cmd(m->uart, cmd);
-    if (!esp01_expect_ok(m->uart, 20000)) {
-        printf("esp01_join_wifi: join failed or timeout\n");
-        return false;
+
+    uint64_t deadline = time_us_64() + 35000 * 1000ULL; // 35s max
+    bool saw_connected = false;
+    char resp[512];
+    while (time_us_64() < deadline) {
+        int r = esp01_read_response(m->uart, resp, sizeof(resp), 2000);
+        if (r > 0) {
+            // print everything we receive while joining for debug
+            printf("esp01_join_wifi: resp='%s'\n", resp);
+            if (strstr(resp, "WIFI CONNECTED") != NULL) {
+                saw_connected = true;
+            }
+            if (strstr(resp, "WIFI GOT IP") != NULL) {
+                printf("esp01_join_wifi: WIFI GOT IP\n");
+                return true;
+            }
+            if (strstr(resp, "+CWJAP:") != NULL) {
+                // +CWJAP:0 means success sometimes; other codes indicate errors
+                if (strstr(resp, "+CWJAP:0") != NULL) {
+                    printf("esp01_join_wifi: +CWJAP:0 (join ok)\n");
+                    return true;
+                }
+                // specific failure codes
+                if (strstr(resp, "+CWJAP:1") != NULL || strstr(resp, "+CWJAP:2") != NULL || strstr(resp, "+CWJAP:3") != NULL) {
+                    printf("esp01_join_wifi: +CWJAP error code reported: %s\n", resp);
+                    return false;
+                }
+            }
+            if (strstr(resp, "ERROR") != NULL || strstr(resp, "FAIL") != NULL) {
+                printf("esp01_join_wifi: join command reported ERROR/FAIL\n");
+                return false;
+            }
+        } else {
+            // no immediate data; if we previously saw CONNECTed try a CIFSR check
+            if (saw_connected) {
+                char ipbuf[64];
+                if (esp01_get_ip(m, ipbuf, sizeof(ipbuf), 2000)) {
+                    printf("esp01_join_wifi: got IP via CIFSR: %s\n", ipbuf);
+                    return true;
+                }
+            }
+        }
+        sleep_ms(100);
     }
-    return true;
+    printf("esp01_join_wifi: timeout waiting for join\n");
+    return false;
 }
 
 // --- TCP transport helpers ---
@@ -120,16 +178,43 @@ bool esp01_tcp_send(esp01_t *m, const uint8_t *data, int len, uint32_t timeout_m
     char cmd[64];
     snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%d", len);
     esp01_send_cmd(m->uart, cmd);
-    // wait for '>' prompt
-    char resp[128];
-    int r = esp01_read_response(m->uart, resp, sizeof(resp), 1000);
+    // wait for '>' prompt (allow some retries and capture debug output)
+    char resp[256];
+    int prompt_wait_ms = (timeout_ms < 2000) ? timeout_ms : 2000;
+    int r = esp01_read_response(m->uart, resp, sizeof(resp), prompt_wait_ms);
+    if (r > 0) {
+        printf("esp01_tcp_send: CIPSEND resp='%s'\n", resp);
+    } else {
+        printf("esp01_tcp_send: no response to CIPSEND (waited %d ms)\n", prompt_wait_ms);
+    }
     if (r <= 0 || strchr(resp, '>') == NULL) {
-        return false;
+        // try one more short read in case the prompt arrives slightly later
+        int r2 = esp01_read_response(m->uart, resp, sizeof(resp), 1000);
+        if (r2 > 0) printf("esp01_tcp_send: CIPSEND retry resp='%s'\n", resp);
+        if (r2 <= 0 || strchr(resp, '>') == NULL) {
+            // give a helpful debug message if ESP reports busy or error
+            if (strstr(resp, "busy") || strstr(resp, "ERROR")) {
+                printf("esp01_tcp_send: ESP reported busy/error: %s\n", resp);
+            }
+            return false;
+        }
     }
     // write raw data
-    for (int i = 0; i < len; ++i) uart_putc_raw(m->uart, data[i]);
-    // after send, wait for SEND OK
-    return esp01_expect_ok(m->uart, timeout_ms);
+    // use blocking write if available to ensure all bytes are queued
+    uart_write_blocking(m->uart, data, len);
+
+    // after send, wait for SEND OK (or ERROR)
+    int n = esp01_read_response(m->uart, resp, sizeof(resp), timeout_ms);
+    if (n > 0) printf("esp01_tcp_send: post-send resp='%s'\n", resp);
+    if (strstr(resp, "SEND OK") != NULL) return true;
+    if (strstr(resp, "ERROR") != NULL) {
+        printf("esp01_tcp_send: send reported ERROR: %s\n", resp);
+        return false;
+    }
+    // if no explicit SEND OK but we saw +IPD or some other response, treat as success
+    if (strstr(resp, "+IPD,") != NULL) return true;
+    // otherwise failure
+    return false;
 }
 
 int esp01_tcp_read(esp01_t *m, uint8_t *buf, int maxlen, uint32_t timeout_ms) {

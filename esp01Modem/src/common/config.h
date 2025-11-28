@@ -22,7 +22,7 @@ extern "C" {
 
 // WiFi credentials (ESP-01)
 #ifndef WIFI_SSID
-#define WIFI_SSID "FarmMain5G" // set your SSID
+#define WIFI_SSID "FarmMain" // set your SSID
 #endif
 
 #ifndef WIFI_PASSWORD

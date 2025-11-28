@@ -1,0 +1,54 @@
+BOOT: stdio connected
+
+Loaded program at 24
+
+ for pio_add_programBlinking pin 25 at 3 Hz
+
+esp01_send_cmd: AT
+
+esp01_expect_ok: resp=''
+
+esp01_init: AT attempt 1 failed
+
+esp01_send_cmd: AT
+
+esp01_expect_ok: resp=''
+
+esp01_init: AT attempt 2 failed
+
+esp01_send_cmd: AT
+
+esp01_expect_ok: resp=''
+
+esp01_init: AT attempt 3 failed
+
+esp01_init: AT no response after retries
+
+esp01_send_cmd: ATE0
+
+esp01_expect_ok: resp=''
+
+esp01_init: ATE0 attempt 1 failed
+
+esp01_send_cmd: ATE0
+
+esp01_expect_ok: resp=''
+
+esp01_init: ATE0 attempt 2 failed
+
+esp01_send_cmd: ATE0
+
+esp01_expect_ok: resp=''
+
+esp01_init: ATE0 attempt 3 failed
+
+esp01_init: failed to disable echo after retries
+
+esp01_send_cmd: AT+CIFSR
+
+WiFi not up yet, attempting join to FarmMain5G (attempt 1)
+
+esp01_join_wifi: attempting join (attempt 1/3)
+
+esp01_send_cmd: AT+CWJAP="FarmMain5G","wweerrtt"
+

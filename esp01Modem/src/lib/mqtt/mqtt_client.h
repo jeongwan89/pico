@@ -18,10 +18,17 @@ typedef struct {
 
 typedef struct {
     const mqtt_config_t *cfg;
+    void *transport; // pointer to transport (esp01_t *)
+    // message callback: topic, payload
+    void (*on_message)(const char *topic, const char *payload);
+    // receive buffer for assembling incoming TCP stream
+    uint8_t rxbuf[2048];
+    int rxlen;
 } mqtt_client_t;
 
 // Attach transport
 void mqtt_set_transport(mqtt_client_t *c, void *transport); // transport is esp01_t*
+void mqtt_set_message_callback(mqtt_client_t *c, void (*cb)(const char *topic, const char *payload));
 
 mqtt_client_t mqtt_client_create(const mqtt_config_t *cfg);
 bool mqtt_connect(mqtt_client_t *c);

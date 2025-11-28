@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
+#include "hardware/gpio.h"
 
 // 4-digit segment map for 0-9, A-F minimal
 static const uint8_t segmap[] = {
